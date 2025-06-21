@@ -41,5 +41,29 @@ def registrar_cliente():
   
 registrar_cliente()
 
+def listar_contatos():
+    cliente_socket = socket(AF_INET, SOCK_STREAM)
+    cliente_socket.connect(('127.0.0.1', 12345))
+
+    mensagem = {
+        "acao": "listar_contatos"
+    }
+    cliente_socket.send(json.dumps(mensagem).encode('utf-8'))
+
+    resposta = cliente_socket.recv(4096).decode('utf-8')
+    resposta_json = json.loads(resposta)
+
+    if resposta_json.get("status") == "ok":
+        print("Lista de usuarios:")
+        for usuario in resposta_json.get("usuarios", []):
+            print("-", usuario)
+
+    else:
+        print("Erro ao buscar contatos.")
+
+    cliente_socket.close()
+
+listar_contatos()
+
 
 

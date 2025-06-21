@@ -55,7 +55,17 @@ def lidar_com_usuario(cliente_socket, endereco):
 
             cliente_socket.send(json.dumps(resposta).encode('utf-8'))
             print("✅ Resposta enviada ao cliente.")
+        
+        elif acao == "listar_contatos":
+            conn = sqlite3.connect('usuarios.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT username FROM usuarios")
+            usuarios = [linha[0] for linha in cursor.fetchall()]
+            conn.close()
 
+            resposta = {"status": "ok", "usuarios": usuarios}
+            cliente_socket.send(json.dumps(resposta).encode('utf-8'))
+            print("Lista de contatos enviada ao cliente.")
     except Exception as e:
         print(f"❌ Erro com cliente {endereco}: {e}")
 
