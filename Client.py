@@ -1,5 +1,8 @@
+from datetime import datetime
 from socket import socket, AF_INET, SOCK_STREAM
 import json
+import threading
+from time import strftime
 
 
 def registrar_cliente():
@@ -39,7 +42,6 @@ def registrar_cliente():
 
     cliente_socket.close()
   
-registrar_cliente()
 
 def listar_contatos():
     cliente_socket = socket(AF_INET, SOCK_STREAM)
@@ -65,5 +67,79 @@ def listar_contatos():
 
 listar_contatos()
 
+def enviar_mensagens(sock, username):
+    while True:
+        destinatario = input("> Para: ")
+        texto = input("> Mensagem: ")
+
+        pacote = {
+            "acao": "enviar_mensagem",
+            "remetente": username,
+            "destinatario": destinatario,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "mensagem": texto
+        }
+
+        sock.send(json.dumps(pacote).encode('utf-8'))
 
 
+
+
+def iniciar_chat():
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect(('127.0.0.1', 12345))
+
+    username = input("Usuario: ")
+    senha = input("Senha: ")
+
+    login_msg = {
+        "acao": "login",
+        "username": username,
+        "senha": senha
+    }
+
+    sock.send(json.dumps(login_msg).encode('utf-8'))
+    resposta = json.loads(sock.recv(1024).decode('utf-8'))
+
+    if resposta.get("status") == "ok":
+        print("✅ Login bem-sucedido. Aguardando mensagens...")
+
+        thread_receber = threading.Thread(target=escutar_servidor, args=(sock,))
+        thread_receber.daemon = True
+        thread_receber.start()
+
+        enviar_mensagens(sock, username)
+
+    else:
+        print("❌ Erro:", resposta.get("mensagem"))
+        sock.close()
+
+def escutar_servidor(sock):
+    try:
+        while True:
+            dados = sock.recv(4096).decode('utf-8')
+            if not dados:
+                break
+
+            mensagem = json.loads(dados)
+            if mensagem.get("acao") == "enviar_mensagem":
+                remetente = mensagem.get("remetente")
+                texto = mensagem.get("mensagem")
+                print(f"\nMensagem de {remetente}: {texto}\n> ", end="")
+    except:
+        print("Conexão com o servidor foi perdida.")
+    finally:
+        sock.close()
+
+if __name__ == "__main__":
+    print("Bem-vindo ao Chat!")
+    print("1 - Registrar")
+    print("2 - Entrar no chat")
+    escolha = input("Escolha uma opção: ")
+
+    if escolha == "1":
+        registrar_cliente()
+    elif escolha == "2":
+        iniciar_chat()
+    else:
+        print("Opção inválida.")
