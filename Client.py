@@ -1,5 +1,5 @@
 from datetime import datetime
-from socket import socket, AF_INET, SOCK_STREAM
+from socket import socket, AF_INET, SOCK_STREAM, timeout
 import json
 import threading
 from time import strftime
@@ -82,9 +82,6 @@ def enviar_mensagens(sock, username):
 
         sock.send(json.dumps(pacote).encode('utf-8'))
 
-
-
-
 def iniciar_chat():
     sock = socket(AF_INET, SOCK_STREAM)
     sock.connect(('127.0.0.1', 12345))
@@ -103,6 +100,22 @@ def iniciar_chat():
 
     if resposta.get("status") == "ok":
         print("✅ Login bem-sucedido. Aguardando mensagens...")
+
+        sock.settimeout(1.0)  # espera por até 1 segundo por mensagens
+        try:
+            while True:
+                dados = sock.recv(4096).decode('utf-8')
+                if not dados:
+                    break
+                mensagem = json.loads(dados)
+                remetente = mensagem.get("remetente")
+                texto = mensagem.get("mensagem")
+                timestamp = mensagem.get("timestamp")
+                print(f"\n📨 Mensagem de {remetente} às {timestamp}: {texto}")
+        except timeout:
+            pass  # terminou o tempo de espera pelas mensagens pendentes
+        finally:
+            sock.settimeout(None)  # volta ao modo bloqueante
 
         thread_receber = threading.Thread(target=escutar_servidor, args=(sock,))
         thread_receber.daemon = True

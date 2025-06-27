@@ -91,24 +91,21 @@ def lidar_com_usuario(cliente_socket, endereco):
             timestamp = requisicao.get("timestamp")
 
             if destinatario in usuarios_online:
-                socket_dest = usuarios_online[destinatario]
-                mensagem_entregue = {
-                    "remetente": remetente,
-                    "mensagem": texto,
-                    "timestamp": timestamp
-                }
-                socket_dest.send(json.dumps(mensagem_entregue).encode('utf-8'))
-                print(f"✉️ Mensagem enviada para {destinatario}")
+                try:
+                    socket_dest = usuarios_online[destinatario]
+                    mensagem_entregue = {
+                        "remetente": remetente,
+                        "mensagem": texto,
+                        "timestamp": timestamp
+                    }
+                    socket_dest.send(json.dumps(mensagem_entregue).encode('utf-8'))
+                    print(f"✉️ Mensagem enviada para {destinatario}")
+                except Exception as e:
+                    print(f"Erro ao entregar mensagem para {destinatario}. Salvando no banco. Erro: {e}")
+                    salvar_mensagem_offline(remetente, destinatario, texto, timestamp)
             else:
-                print(f"📥 {destinatario} está offline. Armazenando mensagem no banco.")
-                conn = sqlite3.connect('usuarios.db')
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO mensagens (remetente, destinatario, mensagem, timestamp, entregue)
-                    VALUES (?, ?, ?, ?, 0)
-                ''', (remetente, destinatario, texto, timestamp))
-                conn.commit()
-                conn.close()
+                print(f"{destinatario} está offline. Armazenando mensagem no banco.")
+                salvar_mensagem_offline(remetente, destinatario, texto, timestamp)
 
         elif acao == "login":
             usuario = requisicao.get("username")
@@ -141,12 +138,12 @@ def lidar_com_usuario(cliente_socket, endereco):
                     }
                     cliente_socket.send(json.dumps(pacote).encode('utf-8'))
 
-                    cursor.execute('UPDATE mensagens SET entregue = 1 WHERE id = ?', (msg_id,))
+                    cursor.execute('DELETE FROM mensagens WHERE id = ?', (msg_id,))
 
                 conn.commit()
                 conn.close()
 
-                print(f"📨 {len(pendentes)} mensagens pendentes entregues para {usuario}")
+                print(f"{len(pendentes)} mensagens pendentes entregues para {usuario}")
        
                 escutar_mensagens(cliente_socket, usuario)
 
@@ -175,8 +172,13 @@ def escutar_mensagens(cliente_socket, usuario):
                         destino_socket.send(json.dumps(requisicao).encode('utf-8'))
                         print(f" Mensagem de {usuario} para {destino} enviada em tempo real.")
                     else:
-                        mensagens_pendentes[destino].append(requisicao)
-                        print(f"{destino} offline. Mensagem armazenada.")
+                        salvar_mensagem_offline(
+                        remetente=requisicao.get("remetente"),
+                        destinatario=destino,
+                        texto=requisicao.get("mensagem"),
+                        timestamp=requisicao.get("timestamp")
+                        )
+                        print(f"{destino} offline. Mensagem salva no banco.")
 
     except:
         print(f"Conexão perdida com {usuario}")
@@ -186,6 +188,16 @@ def escutar_mensagens(cliente_socket, usuario):
                 del usuarios_online[usuario]
         cliente_socket.close()
         print(f"🔌 Conexão encerrada: {usuario}")
+
+def salvar_mensagem_offline(remetente, destinatario, texto, timestamp):
+    conn = sqlite3.connect('usuarios.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO mensagens (remetente, destinatario, mensagem, timestamp, entregue)
+        VALUES (?, ?, ?, ?, 0)
+    ''', (remetente, destinatario, texto, timestamp))
+    conn.commit()
+    conn.close()
 
 def autenticar_usuario(usuario, senha):
     conn = sqlite3.connect('usuarios.db')
