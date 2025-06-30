@@ -147,6 +147,12 @@ def lidar_com_usuario(cliente_socket, endereco):
        
                 escutar_mensagens(cliente_socket, usuario)
 
+        elif acao == "digitando":
+            tratar_digitando(requisicao)
+
+        elif acao == "parou_digitacao":
+            tratar_parar_digitacao(requisicao)
+
        
     except Exception as e:
         print(f"❌ Erro com cliente {endereco}: {e}")
@@ -163,10 +169,12 @@ def escutar_mensagens(cliente_socket, usuario):
                 break
 
             requisicao = json.loads(dados)
+            acao = requisicao.get("acao")
             if requisicao.get("acao") == "enviar_mensagem":
                 destino = requisicao.get("destinatario")
 
                 with lock:
+           
                     if destino in usuarios_online:
                         destino_socket = usuarios_online[destino]
                         destino_socket.send(json.dumps(requisicao).encode('utf-8'))
@@ -179,6 +187,12 @@ def escutar_mensagens(cliente_socket, usuario):
                         timestamp=requisicao.get("timestamp")
                         )
                         print(f"{destino} offline. Mensagem salva no banco.")
+
+            elif acao == "digitando":
+               tratar_digitando(requisicao)
+
+            elif acao == "parou_digitacao":
+                tratar_parar_digitacao(requisicao)
 
     except:
         print(f"Conexão perdida com {usuario}")
@@ -219,6 +233,35 @@ server_socket.bind(('127.0.0.1', 12345))
 server_socket.listen()
 
 print("Servidor ouvindo na porta 12345...")
+
+def tratar_digitando(requisicao):
+    destinatario = requisicao.get("destinatario")
+    remetente = requisicao.get("remetente")
+    with lock:
+        if destinatario in usuarios_online:
+            socket_dest = usuarios_online[destinatario]
+            status = {
+                "acao": "status_digitacao",
+                "usuario": remetente,
+                "digitando": True
+            }
+            socket_dest.send(json.dumps(status).encode('utf-8'))
+            print(f"{remetente} está digitando para {destinatario}")
+
+def tratar_parar_digitacao(requisicao):
+    destinatario = requisicao.get("destinatario")
+    remetente = requisicao.get("remetente")
+    with lock:
+        if destinatario in usuarios_online:
+            socket_dest = usuarios_online[destinatario]
+            status = {
+                "acao": "status_digitacao",
+                "usuario": remetente,
+                "digitando": False
+            }
+            socket_dest.send(json.dumps(status).encode('utf-8'))
+            print(f"{remetente} parou de digitar para {destinatario}")
+    
 
 while True:
     cliente_socket, endereco = server_socket.accept()

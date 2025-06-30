@@ -4,6 +4,7 @@ import json
 import threading
 from time import strftime
 
+timer_digitacao = None
 
 def registrar_cliente():
     print("Conectando ao servidor...")
@@ -70,6 +71,7 @@ listar_contatos()
 def enviar_mensagens(sock, username):
     while True:
         destinatario = input("> Para: ")
+        notificar_digitacao(sock, username, destinatario)
         texto = input("> Mensagem: ")
 
         pacote = {
@@ -135,14 +137,47 @@ def escutar_servidor(sock):
                 break
 
             mensagem = json.loads(dados)
+            acao = mensagem.get("acao")
+
             if mensagem.get("acao") == "enviar_mensagem":
                 remetente = mensagem.get("remetente")
                 texto = mensagem.get("mensagem")
                 print(f"\nMensagem de {remetente}: {texto}\n> ", end="")
+            elif acao == "status_digitacao":
+                usuario = mensagem.get("usuario")
+                if mensagem.get("digitando"):
+                    print(f"\n {usuario} está digitando...\n> ", end="")
+                else:
+                    print(f"\n {usuario} parou de digitar.\n> ", end="")
+               
     except:
         print("Conexão com o servidor foi perdida.")
     finally:
         sock.close()
+
+def notificar_digitacao(sock, remetente, destinatario):
+    global timer_digitacao
+
+    mensagem = {
+        "acao": "digitando",
+        "remetente": remetente,
+        "destinatario": destinatario
+    }
+    sock.send(json.dumps(mensagem).encode('utf-8'))
+
+    if timer_digitacao:
+        timer_digitacao.cancel()
+
+    timer_digitacao = threading.Timer(2.0, notificar_parou_digitar, args=(sock, remetente, destinatario))
+    timer_digitacao.start()
+
+def notificar_parou_digitar(sock, remetente, destinatario):
+    mensagem = {
+        "acao": "parou_digitacao",
+        "remetente": remetente,
+        "destinatario": destinatario
+    }
+    sock.send(json.dumps(mensagem).encode('utf-8'))
 
 if __name__ == "__main__":
     print("Bem-vindo ao Chat!")
