@@ -4,6 +4,7 @@ import threading
 import json
 import sqlite3
 import hashlib
+from datetime import datetime
 
 usuarios_online = {}
 mensagens_pendentes = defaultdict(list)
@@ -43,9 +44,11 @@ def registrar_usuario(username, senha):
     try:
         cursor.execute('INSERT INTO usuarios (username, senha_hash) VALUES (?, ?)', (username, senha_hash))
         conn.commit()
-        return True
+        return {"status": "ok", "mensagem": "Usuário registrado com sucesso!"}
     except sqlite3.IntegrityError:
-        return False
+        return {"status": "erro", "mensagem": "Usuário já existe."}
+    except Exception as e:
+        return {"status": "erro", "mensagem": f"Erro inesperado: {e}"}
     finally:
         conn.close()
 
@@ -63,14 +66,8 @@ def lidar_com_usuario(cliente_socket, endereco):
         if acao == "registrar":
             usuario = requisicao.get("username")
             senha = requisicao.get("senha")
-
-            if registrar_usuario(usuario, senha):
-                
-                resposta = {"status": "ok", "mensagem": "Usuário registrado com sucesso!"}
-            else:
-                resposta = {"status": "erro", "mensagem": "Usuário já existe."}
-
-            cliente_socket.send(json.dumps(resposta).encode('utf-8'))
+            resposta = registrar_usuario(usuario, senha)
+            cliente_socket.send((json.dumps(resposta) + '\n').encode('utf-8'))
             print("✅ Resposta enviada ao cliente.")
         
         elif acao == "listar_contatos":
@@ -81,7 +78,7 @@ def lidar_com_usuario(cliente_socket, endereco):
             conn.close()
 
             resposta = {"status": "ok", "usuarios": usuarios}
-            cliente_socket.send(json.dumps(resposta).encode('utf-8'))
+            cliente_socket.send((json.dumps(resposta) + '\n').encode('utf-8'))
             print("Lista de contatos enviada ao cliente.")
 
         elif acao == "enviar_mensagem":
@@ -94,11 +91,12 @@ def lidar_com_usuario(cliente_socket, endereco):
                 try:
                     socket_dest = usuarios_online[destinatario]
                     mensagem_entregue = {
+                        "acao": "enviar_mensagem",
                         "remetente": remetente,
                         "mensagem": texto,
                         "timestamp": timestamp
                     }
-                    socket_dest.send(json.dumps(mensagem_entregue).encode('utf-8'))
+                    socket_dest.send((json.dumps(mensagem_entregue) + "\n").encode('utf-8'))
                     print(f"✉️ Mensagem enviada para {destinatario}")
                 except Exception as e:
                     print(f"Erro ao entregar mensagem para {destinatario}. Salvando no banco. Erro: {e}")
@@ -116,7 +114,7 @@ def lidar_com_usuario(cliente_socket, endereco):
                     usuarios_online[usuario] = cliente_socket
 
                 resposta = {"status": "ok", "mensagem": "login bem sucedido."}
-                cliente_socket.send(json.dumps(resposta).encode('utf-8'))
+                cliente_socket.send((json.dumps(resposta) + '\n').encode('utf-8'))
                 print(f"Login bem sucedido para {usuario}.")
 
 
@@ -132,11 +130,12 @@ def lidar_com_usuario(cliente_socket, endereco):
                 for msg in pendentes:
                     msg_id, remetente, texto, timestamp = msg
                     pacote = {
+                        "acao": "enviar_mensagem",
                         "remetente": remetente,
                         "mensagem": texto,
                         "timestamp": timestamp
                     }
-                    cliente_socket.send(json.dumps(pacote).encode('utf-8'))
+                    cliente_socket.send((json.dumps(pacote) + '\n').encode('utf-8'))
 
                     cursor.execute('DELETE FROM mensagens WHERE id = ?', (msg_id,))
 
@@ -158,15 +157,22 @@ def lidar_com_usuario(cliente_socket, endereco):
         print(f"❌ Erro com cliente {endereco}: {e}")
 
     finally:
-        cliente_socket.close()
-        print(f"🔌 Conexão encerrada: {endereco}")
+        if acao not in ["login"]:
+            cliente_socket.close()
+            print(f"🔌 Conexão encerrada: {endereco}")
 
 def escutar_mensagens(cliente_socket, usuario):
+    buffer = ""
     try:
         while True:
             dados = cliente_socket.recv(4096).decode('utf-8')
             if not dados:
                 break
+            buffer += dados
+            while '\n' in buffer:
+                linha, buffer = buffer.split('\n', 1)
+                if linha.strip() == "":
+                    continue
 
             requisicao = json.loads(dados)
             acao = requisicao.get("acao")
@@ -177,7 +183,7 @@ def escutar_mensagens(cliente_socket, usuario):
            
                     if destino in usuarios_online:
                         destino_socket = usuarios_online[destino]
-                        destino_socket.send(json.dumps(requisicao).encode('utf-8'))
+                        destino_socket.send((json.dumps(requisicao) + '\n').encode('utf-8'))
                         print(f" Mensagem de {usuario} para {destino} enviada em tempo real.")
                     else:
                         salvar_mensagem_offline(
@@ -245,7 +251,7 @@ def tratar_digitando(requisicao):
                 "usuario": remetente,
                 "digitando": True
             }
-            socket_dest.send(json.dumps(status).encode('utf-8'))
+            socket_dest.send((json.dumps(status) + '\n').encode('utf-8'))
             print(f"{remetente} está digitando para {destinatario}")
 
 def tratar_parar_digitacao(requisicao):
@@ -259,7 +265,7 @@ def tratar_parar_digitacao(requisicao):
                 "usuario": remetente,
                 "digitando": False
             }
-            socket_dest.send(json.dumps(status).encode('utf-8'))
+            socket_dest.send((json.dumps(status) + '\n').encode('utf-8'))
             print(f"{remetente} parou de digitar para {destinatario}")
     
 
