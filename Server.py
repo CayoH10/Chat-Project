@@ -78,8 +78,17 @@ def lidar_com_usuario(cliente_socket, endereco):
             conn.close()
 
             resposta = {"status": "ok", "usuarios": usuarios}
+            usuarios_status = []
+            with lock:
+                for u in usuarios:
+                    status = "online" if u in usuarios_online else "offline"
+                    usuarios_status.append({"nome": u, "status": status})
+
+            resposta = {"status": "ok", "usuarios": usuarios_status}
             cliente_socket.send((json.dumps(resposta) + '\n').encode('utf-8'))
-            print("Lista de contatos enviada ao cliente.")
+            cliente_socket.send((json.dumps(resposta) + '\n').encode('utf-8'))
+            print(f"[DEBUG - SERVIDOR] Pedido de listar_contatos recebido de {endereco}")
+            cliente_socket.close()
 
         elif acao == "enviar_mensagem":
             remetente = requisicao.get("remetente")

@@ -83,7 +83,7 @@ def receber_mensagens():
                         mostrar_mensagem(f"{mensagem['remetente']} ({mensagem['timestamp']}): {mensagem['mensagem']}")
                     elif acao == "status_digitacao":
                         status = f"{mensagem['usuario']} está digitando..." if mensagem['digitando'] else ""
-                    # Atualize a label ou status da interface, exemplo:
+                    
                         label_status.config(text=status)
                     else:
                         print(f"[WARN] Ação desconhecida: {acao}")
@@ -116,6 +116,7 @@ def ao_digitar(event):
 
 def registrar_cliente():
     print("Conectando ao servidor...")
+    global usuario
     usuario = entry_usuario.get()
     senha = entry_senha.get()
 
@@ -143,20 +144,56 @@ def registrar_cliente():
 
 def listar_contatos():
     try:
-
         cliente_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         cliente_socket.connect(('127.0.0.1', 12345))
 
-        mensagem = {
-            "acao": "listar_contatos"
-        }
+        mensagem = {"acao": "listar_contatos"}
         cliente_socket.send(json.dumps(mensagem).encode('utf-8'))
 
-        resposta = cliente_socket.recv(4096).decode('utf-8')
+        dados = ""
+        while '\n' not in dados:
+            parte = cliente_socket.recv(4096).decode('utf-8')
+            dados += parte
+
+        resposta_json, _ = dados.split('\n', 1)
         cliente_socket.close()
-        return json.loads(resposta)
-    except:
-        return {"status": "erro", "mensagem": "Erro na conexão ao listar contatos."}
+        return json.loads(resposta_json)
+
+    except Exception as e:
+        print(f"[ERRO] Falha ao listar contatos: {e}")
+        return {"status": "erro", "mensagem": "Erro ao listar contatos."}
+    
+    
+def carregar_contatos():
+    resposta = listar_contatos()
+    if resposta.get("status") == "ok":
+        contatos = resposta.get("usuarios")
+        lista_contatos.delete(0, tk.END)
+        for contato in contatos:
+            nome = contato["nome"]
+            status = contato["status"]
+            if contato != usuario:
+                icone = "Online" if status == "online" else "Offline"
+                lista_contatos.insert(tk.END, f"{nome} - {icone}")
+    else:
+        messagebox.showerror("Erro", resposta.get("mensagem"))
+
+def ao_logar():
+    global usuario
+    usuario = entry_usuario.get()
+    senha = entry_senha.get()
+
+    conectar_servidor()
+    resposta = fazer_login(sock, usuario, senha)
+
+    if resposta.get("status") == "ok":
+        messagebox.showinfo("Login", "✅ Login realizado com sucesso.")
+        frame_login.pack_forget()
+        frame_chat.pack()
+        threading.Thread(target=receber_mensagens, daemon=True).start()
+        carregar_contatos()  
+    else:
+        messagebox.showerror("Erro", resposta.get("mensagem"))
 
 
 def enviar_mensagens():
@@ -183,7 +220,7 @@ root = tk.Tk()
 root.title("Chat App")
 root.geometry("300x250")
 
-# ======= Tela Inicial =======
+# Tela Inicial
 frame_inicio = tk.Frame(root)
 frame_inicio.pack()
 
@@ -230,6 +267,7 @@ def iniciar_chat():
             frame_chat.pack()
 
             threading.Thread(target=receber_mensagens, daemon=True).start()
+            carregar_contatos()
         else:
             messagebox.showerror("Erro", resposta.get("mensagem"))
             sock.close()
@@ -294,6 +332,18 @@ def escutar_servidor(sock, atualizar_interface):
        atualizar_interface("Conexão com servidor perdida.")
     finally:
         sock.close()
+    
+
+def selecionar_contato(event):
+    global destinatario_atual
+    indice = lista_contatos.curselection()
+    if indice:
+        destinatario_atual = lista_contatos.get(indice)
+        label_status.config(text=f"Conversando com: {destinatario_atual}")
+
+lista_contatos = tk.Listbox(root, height=10)
+lista_contatos.pack(padx=10, pady=10)
+lista_contatos.bind("<<ListboxSelect>>", selecionar_contato)
 
 def notificar_digitacao(sock, remetente, destinatario):
     global timer_digitacao
@@ -319,7 +369,7 @@ def notificar_parou_digitar():
     })
     sock.send(json.dumps(enviar_json).encode('utf-8'))
 
-# ======= Tela de Login =======
+# Tela de Login
 frame_login = tk.Frame(root)
 
 tk.Label(frame_login, text="Usuário:").pack()
@@ -334,10 +384,10 @@ tk.Label(frame_login, text="Destinatário:").pack()
 entry_destinatario = tk.Entry(frame_login)
 entry_destinatario.pack()
 
-btn_entrar_chat = tk.Button(frame_login, text="Entrar no chat", command=iniciar_chat)  # adicione comando depois
+btn_entrar_chat = tk.Button(frame_login, text="Entrar no chat", command=iniciar_chat)  
 btn_entrar_chat.pack(pady=10)
 
-#Tela de Registro 
+
 frame_registro = tk.Frame(root)
 
 tk.Label(frame_registro, text="Novo usuário:").pack()
@@ -348,7 +398,7 @@ tk.Label(frame_registro, text="Nova senha:").pack()
 entry_nova_senha = tk.Entry(frame_registro, show="*")
 entry_nova_senha.pack()
 
-btn_finalizar_registro = tk.Button(frame_registro, text="Registrar", command=registrar_gui)  # adicione comando depois
+btn_finalizar_registro = tk.Button(frame_registro, text="Registrar", command=registrar_gui) 
 btn_finalizar_registro.pack(pady=10)
 
 # Inicia com tela de boas-vindas
