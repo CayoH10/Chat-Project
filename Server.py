@@ -54,21 +54,24 @@ def registrar_usuario(username, senha):
 
 def lidar_com_usuario(cliente_socket, endereco):
     print(f"Cliente conectado: {endereco}")
+    acao = None
 
     try:
         dados = cliente_socket.recv(1024).decode('utf-8')
-        print("📨 Dados recebidos:", repr(dados))
+        print("Dados recebidos:", repr(dados))
+        if not dados.strip():
+            raise ValueError("Dados recebidos vazios.")
 
         requisicao = json.loads(dados)
         acao = requisicao.get("acao")
-        print("🔍 Ação:", acao)
+        print("Ação:", acao)
 
         if acao == "registrar":
             usuario = requisicao.get("username")
             senha = requisicao.get("senha")
             resposta = registrar_usuario(usuario, senha)
             cliente_socket.send((json.dumps(resposta) + '\n').encode('utf-8'))
-            print("✅ Resposta enviada ao cliente.")
+            print("Resposta enviada ao cliente.")
         
         elif acao == "listar_contatos":
             conn = sqlite3.connect('usuarios.db')
@@ -163,12 +166,12 @@ def lidar_com_usuario(cliente_socket, endereco):
 
        
     except Exception as e:
-        print(f"❌ Erro com cliente {endereco}: {e}")
+        print(f"Erro com cliente {endereco}: {e}")
 
     finally:
         if acao not in ["login"]:
             cliente_socket.close()
-            print(f"🔌 Conexão encerrada: {endereco}")
+            print(f"Conexão encerrada: {endereco}")
 
 def escutar_mensagens(cliente_socket, usuario):
     buffer = ""
@@ -216,7 +219,7 @@ def escutar_mensagens(cliente_socket, usuario):
             if usuario in usuarios_online:
                 del usuarios_online[usuario]
         cliente_socket.close()
-        print(f"🔌 Conexão encerrada: {usuario}")
+        print(f"Conexão encerrada: {usuario}")
 
 def salvar_mensagem_offline(remetente, destinatario, texto, timestamp):
     conn = sqlite3.connect('usuarios.db')

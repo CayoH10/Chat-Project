@@ -16,6 +16,16 @@ class GerenciadorUsuarios:
                 senha_hash TEXT NOT NULL
             )
         ''')
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mensagens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                remetente TEXT NOT NULL,
+                destinatario TEXT NOT NULL,
+                mensagem TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                entregue INTEGER DEFAULT 0
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -25,8 +35,17 @@ class GerenciadorUsuarios:
         cursor.execute("DELETE FROM usuarios")
         conn.commit()
         conn.close()
-        print("✅ Todos os usuários foram apagados do banco.")
+        print("Todos os usuários foram apagados do banco.")
+
+    def deletar_mensagens(self):
+        conn = sqlite3.connect(self.caminho_banco)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM mensagens")
+        conn.commit()
+        conn.close()
+        print("Todas as mensagens foram apagadas do banco.")
 
 if __name__ == "__main__":
     gerenciador = GerenciadorUsuarios()
     gerenciador.deletar_todos()
+    gerenciador.deletar_mensagens()

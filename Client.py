@@ -1,10 +1,10 @@
 import tkinter as tk
 from tkinter import simpledialog, messagebox, scrolledtext
-from datetime import datetime
+from datetime import datetime, time
 import socket
 import json
 import threading
-from time import strftime
+import time
 
 timer_digitacao = None
 sock = None
@@ -35,11 +35,11 @@ def registrar_gui():
         resposta_json = json.loads(resposta)
 
         if resposta_json.get("status") == "ok":
-            messagebox.showinfo("Sucesso", "✅ Registro realizado com sucesso.")
+            messagebox.showinfo("Sucesso", "Registro realizado com sucesso.")
             frame_registro.pack_forget()
             frame_login.pack()
         else:
-            messagebox.showerror("Erro", f"❌ Erro ao registrar: {resposta_json.get('mensagem')}")
+            messagebox.showerror("Erro", f"Erro ao registrar: {resposta_json.get('mensagem')}")
 
         cliente_socket.close()
 
@@ -54,6 +54,41 @@ def conectar_servidor():
 def enviar_json(dado):
     mensagem = json.dumps(dado) + '\n'
     sock.send(mensagem.encode('utf-8'))
+
+def tentar_reconectar():
+    global sock
+    print("[RECONEXÃO] Tentando reconectar ao servidor...")
+
+    while True:
+        try:
+            atualizar_status_conexao("Reconectando...", "orange")
+            time.sleep(2)
+
+            if sock:
+                try:
+                    sock.close()
+                except:
+                    pass
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(('localhost', 12345))
+
+            resposta = fazer_login(sock, entry_usuario.get(), entry_senha.get())
+
+            if resposta.get("status") == "ok":
+                atualizar_status_conexao("Reconectado com sucesso.", "green")
+                messagebox.showinfo("Reconectado", "Conexão restabelecida com o servidor.")
+
+                threading.Thread(target=receber_mensagens, daemon=True).start()
+                carregar_contatos()
+                break
+            else:
+                print("[RECONEXÃO] Falha no login:", resposta.get("mensagem"))
+        except Exception as e:
+            print(f"[RECONEXÃO] Erro: {e}")
+            atualizar_status_conexao("Erro na reconexão. Tentando novamente em 5s...", "red")
+
+        time.sleep(5)
 
 buffer = ""
 
@@ -74,11 +109,7 @@ def receber_mensagens():
                     continue
                 try:
                     mensagem = json.loads(linha)
-                    print(f"[DEBUG] Linha recebida para JSON: {repr(linha)}")
-                    print(f"[CLIENTE] Mensagem recebida: {mensagem}")
                     acao = mensagem.get("acao")
-                    print(f"[DEBUG] Linha recebida para JSON: {repr(linha)}")
-                    print(f"[CLIENTE] Mensagem recebida: {mensagem}")
                     if acao == "enviar_mensagem":
                         mostrar_mensagem(f"{mensagem['remetente']} ({mensagem['timestamp']}): {mensagem['mensagem']}")
                     elif acao == "status_digitacao":
@@ -91,7 +122,10 @@ def receber_mensagens():
                     print(f"[ERRO] Falha ao decodificar JSON: {e} - Conteúdo: {repr(linha)}")
 
         except Exception as e:
-            print(f"Erro ao receber mensagens: {e}")
+            print(f"Erro de conexão: {e}")
+            atualizar_status_conexao("Conexão perdida. Tentando reconectar...", "red")
+            messagebox.showwarning("Conexão Perdida", "Tentando reconectar ao servidor...")
+            tentar_reconectar()
             break
                 
 def mostrar_mensagem(texto):
@@ -187,7 +221,7 @@ def ao_logar():
     resposta = fazer_login(sock, usuario, senha)
 
     if resposta.get("status") == "ok":
-        messagebox.showinfo("Login", "✅ Login realizado com sucesso.")
+        messagebox.showinfo("Login", "Login realizado com sucesso.")
         frame_login.pack_forget()
         frame_chat.pack()
         threading.Thread(target=receber_mensagens, daemon=True).start()
@@ -237,6 +271,11 @@ btn_login.pack(pady=10)
 
 btn_registrar = tk.Button(frame_inicio, text="Registrar conta", width=20, command=mostrar_registro)
 btn_registrar.pack(pady=10)
+
+def atualizar_status_conexao(msg, cor="gray"):
+    label_status.config(text=msg, fg=cor)
+    if cor == "green":
+        label_status.after(5000, lambda: label_status.config(text=""))
 
 def iniciar_chat():
     global usuario, destinatario_atual, sock
