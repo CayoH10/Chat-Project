@@ -10,6 +10,7 @@ timer_digitacao = None
 sock = None
 usuario = ""
 destinatario_atual = ""
+contatos_disponiveis = []
 
 def registrar_gui():
     username = entry_novo_usuario.get()
@@ -95,7 +96,6 @@ buffer = ""
 def receber_mensagens():
     global sock, buffer
     while True:
-        print("[CLIENTE] Esperando mensagens...")
         try:
             dados = sock.recv(4096).decode('utf-8')
             if not dados:
@@ -147,33 +147,6 @@ def ao_digitar(event):
 
     timer_digitacao = threading.Timer(2.0, notificar_parou_digitar)
     timer_digitacao.start()
-
-def registrar_cliente():
-    print("Conectando ao servidor...")
-    global usuario
-    usuario = entry_usuario.get()
-    senha = entry_senha.get()
-
-    try:
-        cliente_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        cliente_socket.connect(('127.0.0.1', 12345))
-        print("Conectado ao servidor.")
-    except ConnectionRefusedError:
-        return {"status": "erro", "mensagem": "Conexão encerrada."}
-
-    mensagem = {
-        "acao": "registrar",
-        "username": usuario,
-        "senha": senha
-    }
-
-    cliente_socket.send(json.dumps(mensagem).encode('utf-8'))
-    
-
-    resposta = cliente_socket.recv(1024).decode('utf-8')
-    cliente_socket.close()
-
-    return json.loads(resposta)
   
 
 def listar_contatos():
@@ -199,36 +172,29 @@ def listar_contatos():
     
     
 def carregar_contatos():
+    global contatos_disponiveis
     resposta = listar_contatos()
     if resposta.get("status") == "ok":
-        contatos = resposta.get("usuarios")
+        contatos_disponiveis = [
+            contato for contato in resposta.get("usuarios")
+            if contato["nome"] != usuario
+        ]
         lista_contatos.delete(0, tk.END)
-        for contato in contatos:
+        for contato in contatos_disponiveis:
             nome = contato["nome"]
             status = contato["status"]
-            if contato != usuario:
-                icone = "Online" if status == "online" else "Offline"
-                lista_contatos.insert(tk.END, f"{nome} - {icone}")
+            icone = "Online" if status == "online" else "Offline"
+
+            lista_contatos.insert(
+                tk.END,
+                f"{nome} - {icone}"
+            )
+
     else:
-        messagebox.showerror("Erro", resposta.get("mensagem"))
-
-def ao_logar():
-    global usuario
-    usuario = entry_usuario.get()
-    senha = entry_senha.get()
-
-    conectar_servidor()
-    resposta = fazer_login(sock, usuario, senha)
-
-    if resposta.get("status") == "ok":
-        messagebox.showinfo("Login", "Login realizado com sucesso.")
-        frame_login.pack_forget()
-        frame_chat.pack()
-        threading.Thread(target=receber_mensagens, daemon=True).start()
-        carregar_contatos()  
-    else:
-        messagebox.showerror("Erro", resposta.get("mensagem"))
-
+        messagebox.showerror(
+            "Erro",
+            resposta.get("mensagem")
+        )
 
 def enviar_mensagens():
     global timer_digitacao
@@ -282,10 +248,9 @@ def iniciar_chat():
 
     usuario = entry_usuario.get()
     senha = entry_senha.get()
-    destinatario_atual = entry_destinatario.get()
 
-    if not usuario or not senha or not destinatario_atual:
-        messagebox.showwarning("Campos vazios", "Preencha usuário, senha e destinatario.")
+    if not usuario or not senha:
+        messagebox.showwarning("Campos vazios", "Preencha usuário e senha.")
         return
     
     try:
@@ -307,6 +272,7 @@ def iniciar_chat():
 
             threading.Thread(target=receber_mensagens, daemon=True).start()
             carregar_contatos()
+            root.after(1000, atualizar_contatos_periodicamente)
         else:
             messagebox.showerror("Erro", resposta.get("mensagem"))
             sock.close()
@@ -377,7 +343,8 @@ def selecionar_contato(event):
     global destinatario_atual
     indice = lista_contatos.curselection()
     if indice:
-        destinatario_atual = lista_contatos.get(indice)
+        contato = contatos_disponiveis[indice[0]]
+        destinatario_atual = contato["nome"]
         label_status.config(text=f"Conversando com: {destinatario_atual}")
 
 lista_contatos = tk.Listbox(root, height=10)
@@ -408,6 +375,10 @@ def notificar_parou_digitar():
     })
     sock.send(json.dumps(enviar_json).encode('utf-8'))
 
+def atualizar_contatos_periodicamente():
+    carregar_contatos()
+    root.after(5000, atualizar_contatos_periodicamente)
+
 # Tela de Login
 frame_login = tk.Frame(root)
 
@@ -418,10 +389,6 @@ entry_usuario.pack()
 tk.Label(frame_login, text="Senha:").pack()
 entry_senha = tk.Entry(frame_login, show="*")
 entry_senha.pack()
-
-tk.Label(frame_login, text="Destinatário:").pack()
-entry_destinatario = tk.Entry(frame_login)
-entry_destinatario.pack()
 
 btn_entrar_chat = tk.Button(frame_login, text="Entrar no chat", command=iniciar_chat)  
 btn_entrar_chat.pack(pady=10)

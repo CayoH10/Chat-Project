@@ -109,7 +109,7 @@ def lidar_com_usuario(cliente_socket, endereco):
                         "timestamp": timestamp
                     }
                     socket_dest.send((json.dumps(mensagem_entregue) + "\n").encode('utf-8'))
-                    print(f"✉️ Mensagem enviada para {destinatario}")
+                    print(f"Mensagem enviada para {destinatario}")
                 except Exception as e:
                     print(f"Erro ao entregar mensagem para {destinatario}. Salvando no banco. Erro: {e}")
                     salvar_mensagem_offline(remetente, destinatario, texto, timestamp)
@@ -174,51 +174,78 @@ def lidar_com_usuario(cliente_socket, endereco):
             print(f"Conexão encerrada: {endereco}")
 
 def escutar_mensagens(cliente_socket, usuario):
+
     buffer = ""
+
     try:
         while True:
+
             dados = cliente_socket.recv(4096).decode('utf-8')
+
             if not dados:
                 break
+
             buffer += dados
+
             while '\n' in buffer:
+
                 linha, buffer = buffer.split('\n', 1)
+
                 if linha.strip() == "":
                     continue
 
-            requisicao = json.loads(dados)
-            acao = requisicao.get("acao")
-            if requisicao.get("acao") == "enviar_mensagem":
-                destino = requisicao.get("destinatario")
+                requisicao = json.loads(linha)
+                acao = requisicao.get("acao")
 
-                with lock:
-           
-                    if destino in usuarios_online:
-                        destino_socket = usuarios_online[destino]
-                        destino_socket.send((json.dumps(requisicao) + '\n').encode('utf-8'))
-                        print(f" Mensagem de {usuario} para {destino} enviada em tempo real.")
-                    else:
-                        salvar_mensagem_offline(
-                        remetente=requisicao.get("remetente"),
-                        destinatario=destino,
-                        texto=requisicao.get("mensagem"),
-                        timestamp=requisicao.get("timestamp")
-                        )
-                        print(f"{destino} offline. Mensagem salva no banco.")
+                if acao == "enviar_mensagem":
 
-            elif acao == "digitando":
-               tratar_digitando(requisicao)
+                    destino = requisicao.get("destinatario")
 
-            elif acao == "parou_digitacao":
-                tratar_parar_digitacao(requisicao)
+                    with lock:
+                        if destino in usuarios_online:
 
-    except:
-        print(f"Conexão perdida com {usuario}")
+                            destino_socket = usuarios_online[destino]
+
+                            destino_socket.send(
+                                (json.dumps(requisicao) + '\n').encode('utf-8')
+                            )
+
+                            print(
+                                f"Mensagem de {usuario} para {destino} "
+                                f"enviada em tempo real."
+                            )
+
+                        else:
+
+                            salvar_mensagem_offline(
+                                remetente=requisicao.get("remetente"),
+                                destinatario=destino,
+                                texto=requisicao.get("mensagem"),
+                                timestamp=requisicao.get("timestamp")
+                            )
+
+                            print(
+                                f"{destino} offline. "
+                                f"Mensagem salva no banco."
+                            )
+
+                elif acao == "digitando":
+                    tratar_digitando(requisicao)
+
+                elif acao == "parou_digitacao":
+                    tratar_parar_digitacao(requisicao)
+
+    except Exception as e:
+        print(f"Conexão perdida com {usuario}: {e}")
+
     finally:
+
         with lock:
             if usuario in usuarios_online:
                 del usuarios_online[usuario]
+
         cliente_socket.close()
+
         print(f"Conexão encerrada: {usuario}")
 
 def salvar_mensagem_offline(remetente, destinatario, texto, timestamp):
