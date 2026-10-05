@@ -11,6 +11,7 @@ sock = None
 usuario = ""
 destinatario_atual = ""
 contatos_disponiveis = []
+conversas = {}
 
 def registrar_gui():
     username = entry_novo_usuario.get()
@@ -95,6 +96,7 @@ buffer = ""
 
 def receber_mensagens():
     global sock, buffer
+
     while True:
         try:
             dados = sock.recv(4096).decode('utf-8')
@@ -107,24 +109,59 @@ def receber_mensagens():
                 linha, buffer = buffer.split('\n', 1)
                 if linha.strip() == "":
                     continue
+
                 try:
                     mensagem = json.loads(linha)
                     acao = mensagem.get("acao")
                     if acao == "enviar_mensagem":
-                        mostrar_mensagem(f"{mensagem['remetente']} ({mensagem['timestamp']}): {mensagem['mensagem']}")
+
+                        remetente = mensagem["remetente"]
+                        texto = mensagem["mensagem"]
+                        timestamp = mensagem["timestamp"]
+                        
+                        if remetente not in conversas:
+                            conversas[remetente] = []
+
+                        
+                        conversas[remetente].append(
+                            (remetente, texto, timestamp)
+                        )
+                                                
+                        if remetente == destinatario_atual:
+                            root.after(0, mostrar_conversa, destinatario_atual)
+
                     elif acao == "status_digitacao":
-                        status = f"{mensagem['usuario']} está digitando..." if mensagem['digitando'] else ""
-                    
-                        label_status.config(text=status)
+
+                        status = (
+                            f"{mensagem['usuario']} está digitando..."
+                            if mensagem['digitando']
+                            else ""
+                        )
+
+                        root.after(0, lambda: label_status.config(text=status))
+
                     else:
                         print(f"[WARN] Ação desconhecida: {acao}")
+
                 except json.JSONDecodeError as e:
-                    print(f"[ERRO] Falha ao decodificar JSON: {e} - Conteúdo: {repr(linha)}")
+                    print(
+                        f"[ERRO] Falha ao decodificar JSON: "
+                        f"{e} - Conteúdo: {repr(linha)}"
+                    )
 
         except Exception as e:
+
             print(f"Erro de conexão: {e}")
-            atualizar_status_conexao("Conexão perdida. Tentando reconectar...", "red")
-            messagebox.showwarning("Conexão Perdida", "Tentando reconectar ao servidor...")
+
+            atualizar_status_conexao(
+                "Conexão perdida. Tentando reconectar...",
+                "red"
+            )
+
+            messagebox.showwarning(
+                "Conexão Perdida",
+                "Tentando reconectar ao servidor..."
+            )
             tentar_reconectar()
             break
                 
@@ -155,7 +192,7 @@ def listar_contatos():
         cliente_socket.connect(('127.0.0.1', 12345))
 
         mensagem = {"acao": "listar_contatos"}
-        cliente_socket.send(json.dumps(mensagem).encode('utf-8'))
+        cliente_socket.send((json.dumps(mensagem) + '\n').encode('utf-8'))
 
         dados = ""
         while '\n' not in dados:
@@ -169,6 +206,9 @@ def listar_contatos():
     except Exception as e:
         print(f"[ERRO] Falha ao listar contatos: {e}")
         return {"status": "erro", "mensagem": "Erro ao listar contatos."}
+
+    finally:
+        cliente_socket.close()
     
     
 def carregar_contatos():
@@ -196,11 +236,22 @@ def carregar_contatos():
             resposta.get("mensagem")
         )
 
+def atualizar_contatos():
+    carregar_contatos()
+    root.after(3000, atualizar_contatos)
+
 def enviar_mensagens():
     global timer_digitacao
 
     texto = entry_mensagem.get()
     if not texto.strip():
+        return
+
+    if not destinatario_atual:
+        messagebox.showwarning(
+            "Aviso",
+            "Selecione um contato primeiro"
+        )
         return
     
     pacote = {
@@ -211,6 +262,10 @@ def enviar_mensagens():
         "mensagem": texto
     }
     enviar_json(pacote)
+    if destinatario_atual not in conversas:
+        conversas[destinatario_atual] = []
+    conversas[destinatario_atual].append(("Você", texto, pacote["timestamp"]))
+    mostrar_conversa(destinatario_atual)
     entry_mensagem.delete(0, tk.END)
     if timer_digitacao:
         timer_digitacao.cancel()
@@ -272,6 +327,7 @@ def iniciar_chat():
 
             threading.Thread(target=receber_mensagens, daemon=True).start()
             carregar_contatos()
+            atualizar_contatos()
             root.after(1000, atualizar_contatos_periodicamente)
         else:
             messagebox.showerror("Erro", resposta.get("mensagem"))
@@ -346,10 +402,20 @@ def selecionar_contato(event):
         contato = contatos_disponiveis[indice[0]]
         destinatario_atual = contato["nome"]
         label_status.config(text=f"Conversando com: {destinatario_atual}")
+        mostrar_conversa(destinatario_atual)
 
 lista_contatos = tk.Listbox(root, height=10)
 lista_contatos.pack(padx=10, pady=10)
 lista_contatos.bind("<<ListboxSelect>>", selecionar_contato)
+
+def mostrar_conversa(contato):
+    chat_area.config(state=tk.NORMAL)
+    chat_area.delete("1.0", tk.END)
+    mensagens = conversas.get(contato, [])
+
+    for remetente, mensagem, timestamp in mensagens:
+        chat_area.insert(tk.END, f"{remetente}: {mensagem}\n")
+    chat_area.config(state=tk.DISABLED)
 
 def notificar_digitacao(sock, remetente, destinatario):
     global timer_digitacao

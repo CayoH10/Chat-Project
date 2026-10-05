@@ -193,8 +193,15 @@ def escutar_mensagens(cliente_socket, usuario):
 
                 if linha.strip() == "":
                     continue
-
-                requisicao = json.loads(linha)
+                try:
+                    requisicao = json.loads(linha)
+                except json.JSONDecodeError as e:
+                    print(
+                        f"[ERRO JSON] Mensagem inválida de {usuario}: "
+                        f"{e} | Conteúdo: {repr(linha)}"
+                    )
+                    continue
+                
                 acao = requisicao.get("acao")
 
                 if acao == "enviar_mensagem":
