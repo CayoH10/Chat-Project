@@ -5,7 +5,11 @@ import json
 import sqlite3
 import hashlib
 from datetime import datetime
+from argon2 import PasswordHasher
+from argon2.exceptions import VerificationError, InvalidHash
+import hmac
 
+ph = PasswordHasher()
 usuarios_online = {}
 mensagens_pendentes = defaultdict(list)
 lock = threading.Lock()
@@ -39,7 +43,7 @@ def registrar_usuario(username, senha):
     conn = sqlite3.connect('usuarios.db')
     cursor = conn.cursor()
     
-    senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+    senha_hash = ph.hash(senha)
 
     try:
         cursor.execute('INSERT INTO usuarios (username, senha_hash) VALUES (?, ?)', (username, senha_hash))
@@ -269,13 +273,50 @@ def autenticar_usuario(usuario, senha):
     conn = sqlite3.connect('usuarios.db')
     cursor = conn.cursor()
 
-    senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+    try:
+        cursor.execute(
+            'SELECT senha_hash FROM usuarios WHERE username = ?',
+            (usuario,)
+        )
+        resultado = cursor.fetchone()
 
-    cursor.execute('SELECT * FROM usuarios WHERE username = ? AND senha_hash = ?', (usuario, senha_hash))
-    resultado = cursor.fetchone()
+        if resultado is None:
+            return False
 
-    conn.close()
-    return resultado is not None
+        senha_armazenada = resultado[0]
+
+        if senha_armazenada.startswith("$argon2"):
+            try:
+                senha_valida = ph.verify(senha_armazenada, senha)
+            except (VerificationError, InvalidHash):
+                return False
+
+            if senha_valida and ph.check_needs_rehash(senha_armazenada):
+                novo_hash = ph.hash(senha)
+
+                cursor.execute(
+                    'UPDATE usuarios SET senha_hash = ? WHERE username = ?',
+                    (novo_hash, usuario)
+                )
+                conn.commit()
+            return senha_valida
+
+        hash_antigo = hashlib.sha256(senha.encode()).hexdigest()
+
+        if hmac.compare_digest(senha_armazenada, hash_antigo):
+            novo_hash = ph.hash(senha)
+
+            cursor.execute(
+                'UPDATE usuarios SET senha_hash = ? WHERE username = ?',
+                (novo_hash, usuario)
+            )
+            conn.commit()
+
+            return True
+        return False
+    finally:
+        conn.close()
+
 
 def iniciar_servidor():
     inicializar_banco()
