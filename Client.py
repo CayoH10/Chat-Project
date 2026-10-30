@@ -24,7 +24,7 @@ def registrar_gui():
     cliente_socket = None
 
     try:
-        cliente_socket = conectar_ao_servidor()
+        cliente_socket = conectar_servidor()
 
         mensagem = {
             "acao": "registrar",
@@ -203,28 +203,35 @@ def ao_digitar(event):
   
 
 def listar_contatos():
+    cliente_socket = None
+
     try:
-        cliente_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        cliente_socket.connect(('127.0.0.1', 12345))
+        cliente_socket = conectar_servidor()
 
         mensagem = {"acao": "listar_contatos"}
-        cliente_socket.send((json.dumps(mensagem) + '\n').encode('utf-8'))
+        cliente_socket.sendall((json.dumps(mensagem) + '\n').encode('utf-8'))
 
-        dados = ""
-        while '\n' not in dados:
-            parte = cliente_socket.recv(4096).decode('utf-8')
+        dados = b""
+        while b'\n' not in dados:
+            parte = cliente_socket.recv(4096)
+            
+            if not parte:
+                raise ConnectionError("O servidor encerrou a conexão.")
             dados += parte
 
-        resposta_json, _ = dados.split('\n', 1)
-        cliente_socket.close()
-        return json.loads(resposta_json)
+        linha, _ = dados.split(b'\n', 1)
+        return json.loads(linha.decode('utf-8'))
 
     except Exception as e:
         print(f"[ERRO] Falha ao listar contatos: {e}")
-        return {"status": "erro", "mensagem": "Erro ao listar contatos."}
 
+        return {
+            "status": "erro",
+            "mensagem": "Erro ao listar contatos."
+        }
     finally:
-        cliente_socket.close()
+        if cliente_socket:
+            cliente_socket.close()
     
     
 def carregar_contatos():
@@ -325,37 +332,51 @@ def iniciar_chat():
         return
     
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(('127.0.0.1', 12345))
-
+        sock = conectar_servidor()
         login_msg = {
             "acao": "login",
             "username": usuario,
             "senha": senha
         }
-        sock.send(json.dumps(login_msg).encode('utf-8'))
-        resposta = json.loads(sock.recv(1024).decode('utf-8'))
+        sock.sendall((json.dumps(login_msg) + '\n').encode('utf-8'))
+
+        dados = b""
+
+        while b'\n' not in dados:
+            parte = sock.recv(4096)
+
+            if not parte:
+                raise ConnectionError("O servidor encerrou a conexão.")
+
+            dados += parte
+
+        linha, restante = dados.split(b'\n', 1)
+        resposta = json.loads(linha.decode('utf-8'))
 
         if resposta.get("status") == "ok":
+            buffer = restante.decode('utf-8')
+
             messagebox.showinfo("Sucesso", "Login realizado com sucesso.")
+
             frame_login.pack_forget()
             frame_chat.pack()
 
             threading.Thread(target=receber_mensagens, daemon=True).start()
             carregar_contatos()
             atualizar_contatos()
+
             root.after(1000, atualizar_contatos_periodicamente)
+
         else:
-            messagebox.showerror("Erro", resposta.get("mensagem"))
+            messagebox.showerror("Erro", resposta.get("Mensagem", "Falha no login"))
             sock.close()
             sock = None
     except Exception as e:
+        if sock:
+            sock.close()
+            sock = None
         messagebox.showerror("Erro", f"Erro ao conectar ao servidor: {e}")
 
-def conectar_ao_servidor():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(('127.0.0.1', 12345))
-    return sock
 
 def fazer_login(sock, username, senha):
     login_msg = {
