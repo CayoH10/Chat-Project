@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import simpledialog, messagebox, scrolledtext
 from datetime import datetime, time
+from Security import proteger_socket_cliente
 import socket
 import json
 import threading
@@ -20,10 +21,10 @@ def registrar_gui():
     if not username or not senha:
         messagebox.showwarning("Campos vazios", "Preencha todos os campos.")
         return
+    cliente_socket = None
 
     try:
-        cliente_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        cliente_socket.connect(('127.0.0.1', 12345))
+        cliente_socket = conectar_ao_servidor()
 
         mensagem = {
             "acao": "registrar",
@@ -31,10 +32,18 @@ def registrar_gui():
             "senha": senha
         }
 
-        cliente_socket.send(json.dumps(mensagem).encode('utf-8'))
+        cliente_socket.sendall((json.dumps(mensagem) + '\n').encode('utf-8'))
+        dados = b""
 
-        resposta = cliente_socket.recv(1024).decode('utf-8')
-        resposta_json = json.loads(resposta)
+        while b'\n' not in dados:
+            parte = cliente_socket.recv(4096)
+
+            if not parte:
+                raise ConnectionError("O servidor encerrou a conexão")
+            dados += parte
+
+        linha,_ = dados.split(b'\n', 1)
+        resposta_json = json.loads(linha.decode('utf-8'))
 
         if resposta_json.get("status") == "ok":
             messagebox.showinfo("Sucesso", "Registro realizado com sucesso.")
@@ -43,15 +52,22 @@ def registrar_gui():
         else:
             messagebox.showerror("Erro", f"Erro ao registrar: {resposta_json.get('mensagem')}")
 
-        cliente_socket.close()
-
     except Exception as e:
-        messagebox.showerror("Erro", f"Falha na conexão com o servidor.\n{e}")
+        messagebox.showerror("Erro", f"Falha na conexão com servidor.\n{e}")
+
+    finally:
+        if cliente_socket:
+            cliente_socket.close()
 
 def conectar_servidor():
-    global sock
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(('127.0.0.1', 12345))
+    cliente_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    cliente_socket.connect(('127.0.0.1', 12345))
+    try:
+        cliente_seguro = proteger_socket_cliente(cliente_socket)
+        return cliente_seguro
+    except Exception:
+        cliente_socket.close()
+        raise
 
 def enviar_json(dado):
     mensagem = json.dumps(dado) + '\n'

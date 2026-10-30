@@ -1,5 +1,5 @@
 from collections import defaultdict
-from socket import socket, AF_INET, SOCK_STREAM
+from socket import SO_REUSEADDR, SOL_SOCKET, socket, AF_INET, SOCK_STREAM
 import threading 
 import json
 import sqlite3
@@ -7,6 +7,7 @@ import hashlib
 from datetime import datetime
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, InvalidHash
+from Security import criar_contexto_servidor, proteger_socket_servidor
 import hmac
 
 ph = PasswordHasher()
@@ -321,11 +322,32 @@ def autenticar_usuario(usuario, senha):
 def iniciar_servidor():
     inicializar_banco()
 
-server_socket = socket(AF_INET, SOCK_STREAM)
-server_socket.bind(('127.0.0.1', 12345))
-server_socket.listen()
+    contexto_tls = criar_contexto_servidor()
+    server_socket = socket(AF_INET, SOCK_STREAM)
+    server_socket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    server_socket.bind(("127.0.0.1", 12345))
+    server_socket.listen()
 
-print("Servidor ouvindo na porta 12345...")
+    print("Servidor ouvindo na porta 12345 com TLS 1.3...")
+
+    while True:
+        cliente_socket, endereco = server_socket.accept()
+
+        try:
+            cliente_seguro = proteger_socket_servidor(
+                cliente_socket,
+                contexto_tls
+            )
+
+            thread = threading.Thread(
+                target=lidar_com_usuario,
+                args=(cliente_seguro, endereco),
+                daemon=True
+            )
+            thread.start()
+        except Exception as e:
+            print(f"Erro ao proteger conexão de {endereco}: {e}")
+            cliente_socket.close()
 
 def tratar_digitando(requisicao):
     destinatario = requisicao.get("destinatario")
@@ -356,11 +378,6 @@ def tratar_parar_digitacao(requisicao):
             print(f"{remetente} parou de digitar para {destinatario}")
     
 
-while True:
-    cliente_socket, endereco = server_socket.accept()
-    thread = threading.Thread(target=lidar_com_usuario, args=(cliente_socket, endereco))
-    thread.start()
-
-    if __name__ == "__main__":
-     iniciar_servidor()
+if __name__ == "__main__":
+    iniciar_servidor()
 
