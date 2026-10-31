@@ -215,37 +215,75 @@ def escutar_mensagens(cliente_socket, usuario):
                 
                 acao = requisicao.get("acao")
 
-                if acao == "enviar_mensagem":
-
+                if acao == "trocar_chave":
+                    remetente = requisicao.get("remetente")
                     destino = requisicao.get("destinatario")
+
+                    pacote = {
+                        "acao": "trocar_chave",
+                        "remetente": remetente,
+                        "chave_publica": requisicao.get("chave_publica"),
+                        "salt": requisicao.get("salt")
+                    }
 
                     with lock:
                         if destino in usuarios_online:
+                            try:
+                                destino_socket = usuarios_online[destino]
 
-                            destino_socket = usuarios_online[destino]
+                                destino_socket.sendall((json.dumps(pacote) + '\n').encode('utf-8'))
+                                print(f"Chave publica de {remetente}" f"encaminhada para {destino}.")
+                            except Exception as e:
+                                print(f"[ERRO] Falha ao encaminhar chave: {e}")
+                        else:
+                            print(f"[AVISO] {destino} está offline." "Troca de chaves não realizada.")
 
-                            destino_socket.send(
-                                (json.dumps(requisicao) + '\n').encode('utf-8')
-                            )
+                if acao == "enviar_mensagem":
 
-                            print(
-                                f"Mensagem de {usuario} para {destino} "
-                                f"enviada em tempo real."
-                            )
+                    remetente = requisicao.get("remetente")
+                    destino = requisicao.get("destinatario")
+                    mensagem_cifrada = requisicao.get("mensagem_cifrada")
+                    nonce = requisicao.get("nonce")
+                    timestamp = requisicao.get("timestamp")
+
+                    if not remetente or not destino or not mensagem_cifrada or not nonce:
+                        print("[ERRO] Mensagem criptografada incompleta.")
+                        continue
+
+                    pacote = {
+                        "acao": "enviar_mensagem",
+                        "remetente": remetente,
+                        "mensagem_cifrada": mensagem_cifrada,
+                        "nonce": nonce,
+                        "timestamp": timestamp
+                    }
+
+                    with lock:
+                        if destino in usuarios_online:
+                            try:
+                                destino_socket = usuarios_online[destino]
+                                destino_socket.sendall(
+                                    (json.dumps(pacote) + '\n').encode('utf-8')
+                                )
+                                print(f"Mensagem cifrada de {remetente} para {destino} enviada.")
+                            except Exception as e:
+                                print(f"[ERRO] Falha na entrega: {e}")
+
+                                salvar_mensagem_offline(
+                                    remetente,
+                                    destino,
+                                    json.dumps(pacote),
+                                    timestamp
+                                )
 
                         else:
-
                             salvar_mensagem_offline(
-                                remetente=requisicao.get("remetente"),
-                                destinatario=destino,
-                                texto=requisicao.get("mensagem"),
-                                timestamp=requisicao.get("timestamp")
+                                remetente,
+                                destino,
+                                json.dumps(pacote),
+                                timestamp
                             )
-
-                            print(
-                                f"{destino} offline. "
-                                f"Mensagem salva no banco."
-                            )
+                            print(f"{destino} offline. Mensagem cifrada armazenada.")
 
                 elif acao == "digitando":
                     tratar_digitando(requisicao)
@@ -266,13 +304,13 @@ def escutar_mensagens(cliente_socket, usuario):
 
         print(f"Conexão encerrada: {usuario}")
 
-def salvar_mensagem_offline(remetente, destinatario, texto, timestamp):
+def salvar_mensagem_offline(remetente, destinatario, mensagem_cifrada, timestamp):
     conn = sqlite3.connect('usuarios.db')
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO mensagens (remetente, destinatario, mensagem, timestamp, entregue)
         VALUES (?, ?, ?, ?, 0)
-    ''', (remetente, destinatario, texto, timestamp))
+    ''', (remetente, destinatario, mensagem_cifrada, timestamp))
     conn.commit()
     conn.close()
 

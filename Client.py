@@ -70,117 +70,107 @@ def conectar_servidor():
         raise
 
 def enviar_json(dado):
+    global sock
+
+    if sock is None:
+        raise ConnectionError("Não há conexão com o servidor.")
+    
     mensagem = json.dumps(dado) + '\n'
-    sock.send(mensagem.encode('utf-8'))
+    sock.sendall(mensagem.encode('utf-8'))
 
 def tentar_reconectar():
-    global sock
-    print("[RECONEXÃO] Tentando reconectar ao servidor...")
+    global sock, buffer
 
-    while True:
-        try:
-            atualizar_status_conexao("Reconectando...", "orange")
-            time.sleep(2)
+    try:
+        print("[INFO] Tentando reconectar...")
 
-            if sock:
-                try:
-                    sock.close()
-                except:
-                    pass
+        novo_socket = conectar_servidor()
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(('localhost', 12345))
+        login_msg = {
+            "acao": "login",
+            "username": usuario,
+            "senha": entry_senha.get()
+        }
 
-            resposta = fazer_login(sock, entry_usuario.get(), entry_senha.get())
+        novo_socket.sendall((json.dumps(login_msg) + '\n').encode('utf-8'))
 
-            if resposta.get("status") == "ok":
-                atualizar_status_conexao("Reconectado com sucesso.", "green")
-                messagebox.showinfo("Reconectado", "Conexão restabelecida com o servidor.")
+        dados = b""
 
-                threading.Thread(target=receber_mensagens, daemon=True).start()
-                carregar_contatos()
-                break
-            else:
-                print("[RECONEXÃO] Falha no login:", resposta.get("mensagem"))
-        except Exception as e:
-            print(f"[RECONEXÃO] Erro: {e}")
-            atualizar_status_conexao("Erro na reconexão. Tentando novamente em 5s...", "red")
+        while b'\n' not in dados:
+            parte = novo_socket.recv(4096)
 
-        time.sleep(5)
+            if not parte:
+                raise ConnectionError("Servidor encerrou a conexão.")
+            dados += parte
+        linha, restante = dados.split(b'\n', 1)
+        resposta = json.loads(linha.decode('utf-8'))
 
-buffer = ""
+        if resposta.get("status") == "ok":
+            sock = novo_socket
+            buffer = restante.decode('utf-8')
+            print("[INFO] Reconectado com sucesso.")
+        else:
+            novo_socket.close()
+            print("[ERRO] Falha ao reconectar:", resposta.get("mensagem"))
+
+    except Exception as e:
+        print(f"[ERRO] Não foi possivel reconectar: {e}")
 
 def receber_mensagens():
     global sock, buffer
 
     while True:
         try:
-            dados = sock.recv(4096).decode('utf-8')
-            if not dados:
-                break
+            dados = sock.recv(4096)
 
-            buffer += dados
+            if not dados:
+                raise ConnectionError("Servidor encerrou a conexão.")
+
+            buffer += dados.decode('utf-8')
 
             while '\n' in buffer:
                 linha, buffer = buffer.split('\n', 1)
-                if linha.strip() == "":
+
+                if not linha.strip():
                     continue
 
                 try:
                     mensagem = json.loads(linha)
                     acao = mensagem.get("acao")
-                    if acao == "enviar_mensagem":
 
+                    if acao == "enviar_mensagem":
                         remetente = mensagem["remetente"]
                         texto = mensagem["mensagem"]
                         timestamp = mensagem["timestamp"]
-                        
+
                         if remetente not in conversas:
                             conversas[remetente] = []
 
-                        
-                        conversas[remetente].append(
-                            (remetente, texto, timestamp)
-                        )
-                                                
+                        conversas[remetente].append((remetente, texto, timestamp))
+
                         if remetente == destinatario_atual:
                             root.after(0, mostrar_conversa, destinatario_atual)
-
                     elif acao == "status_digitacao":
-
                         status = (
-                            f"{mensagem['usuario']} está digitando..."
+                            f"{mensagem['usuario']} esta digitando..."
                             if mensagem['digitando']
                             else ""
                         )
 
-                        root.after(0, lambda: label_status.config(text=status))
+                        root.after(0, lambda s=status: label_status.config(text=s))
 
                     else:
                         print(f"[WARN] Ação desconhecida: {acao}")
-
                 except json.JSONDecodeError as e:
-                    print(
-                        f"[ERRO] Falha ao decodificar JSON: "
-                        f"{e} - Conteúdo: {repr(linha)}"
-                    )
-
+                    print(f"[ERRO] JSON inválido: {e}")
         except Exception as e:
+            print(f"[ERRO] Conexão perdida: {e}")
 
-            print(f"Erro de conexão: {e}")
-
-            atualizar_status_conexao(
-                "Conexão perdida. Tentando reconectar...",
-                "red"
-            )
-
-            messagebox.showwarning(
-                "Conexão Perdida",
-                "Tentando reconectar ao servidor..."
-            )
+            atualizar_status_conexao("Conexão perdida. Tentando reconectar...", "red")
+            root.after(0, lambda: messagebox.showwarning("Conexão perdida", "Tentando reconectar ao servidor..."))
             tentar_reconectar()
             break
-                
+        
 def mostrar_mensagem(texto):
     chat_area.config(state='normal')
     chat_area.insert(tk.END, texto + "\n")
@@ -189,6 +179,10 @@ def mostrar_mensagem(texto):
 
 def ao_digitar(event):
     global timer_digitacao
+
+    if not destinatario_atual or sock is None:
+        return
+    
     enviar_json({
         "acao": "digitando",
         "remetente": usuario,
@@ -198,7 +192,7 @@ def ao_digitar(event):
     if timer_digitacao:
         timer_digitacao.cancel()
 
-    timer_digitacao = threading.Timer(2.0, notificar_parou_digitar)
+    timer_digitacao = threading.Timer(2.0, notificar_parou_digitar, args=(sock, usuario, destinatario_atual))
     timer_digitacao.start()
   
 
@@ -288,11 +282,15 @@ def enviar_mensagens():
     if destinatario_atual not in conversas:
         conversas[destinatario_atual] = []
     conversas[destinatario_atual].append(("Você", texto, pacote["timestamp"]))
+
     mostrar_conversa(destinatario_atual)
     entry_mensagem.delete(0, tk.END)
+
     if timer_digitacao:
         timer_digitacao.cancel()
-        notificar_parou_digitar()
+        timer_digitacao = None
+
+    notificar_parou_digitar(sock, usuario, destinatario_atual)
 
 root = tk.Tk()
 root.title("Chat App")
@@ -455,28 +453,28 @@ def mostrar_conversa(contato):
     chat_area.config(state=tk.DISABLED)
 
 def notificar_digitacao(sock, remetente, destinatario):
-    global timer_digitacao
+    if sock is None:
+        return
 
     mensagem = {
         "acao": "digitando",
         "remetente": remetente,
         "destinatario": destinatario
     }
-    sock.send(json.dumps(mensagem).encode('utf-8'))
 
-    if timer_digitacao:
-        timer_digitacao.cancel()
+    sock.sendall((json.dumps(mensagem) + '\n').encode('utf-8'))
 
-    timer_digitacao = threading.Timer(2.0, notificar_parou_digitar)
-    timer_digitacao.start()
+def notificar_parou_digitar(sock, remetente, destinatario):
+    if sock is None:
+        return
 
-def notificar_parou_digitar():
-    enviar_json = ({
+    mensagem = {
         "acao": "parou_digitacao",
-        "remetente": usuario,
-        "destinatario": destinatario_atual
-    })
-    sock.send(json.dumps(enviar_json).encode('utf-8'))
+        "remetente": remetente,
+        "destinatario": destinatario
+    }
+
+    sock.sendall((json.dumps(mensagem) + '\n').encode('utf-8'))
 
 def atualizar_contatos_periodicamente():
     carregar_contatos()

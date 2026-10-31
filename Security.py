@@ -9,6 +9,9 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.asymmetric import x25519
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 PASTA_SEGURANCA = Path(__file__).resolve().parent
 ARQUIVO_CERTIFICADO = PASTA_SEGURANCA / "servidor_cert.pem"
@@ -103,3 +106,55 @@ def proteger_socket_servidor(sock, contexto):
         sock,
         server_side=True
     )
+
+def gerar_chaves_dh():
+
+    chave_privada = x25519.X25519PrivateKey.generate()
+    chave_publica = chave_privada.public_key()
+
+    return chave_privada, chave_publica
+
+def serializar_chave_publica(chave_publica):
+    return chave_publica.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+
+def carregar_chave_publica(chave_bytes):
+    return x25519.X25519PublicKey.from_public_bytes(chave_bytes)
+
+def derivar_chave_sessao(chave_privada, chave_publica_remota, salt):
+
+    segredo_compartilhado = chave_privada.exchange(chave_publica_remota)
+
+    chave = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"chat-e2ee-aes-256"
+    ).derive(segredo_compartilhado)
+
+    return chave
+
+def criptografar_mensagem(chave, mensagem):
+
+    aes = AESGCM(chave)
+    nonce = os.urandom(12)
+    mensagem_bytes = mensagem.encode('utf-8')
+
+    mensagem_cifrada = aes.encrypt(
+        nonce,
+        mensagem_bytes,
+        None
+    )
+    return nonce, mensagem_cifrada
+
+def descriptografar_mensagem(chave, nonce, mensagem_cifrada):
+
+    aes = AESGCM(chave)
+
+    mensagem_original = aes.decrypt(
+        nonce,
+        mensagem_cifrada,
+        None
+    )
+    return mensagem_original.decode('utf-8')
