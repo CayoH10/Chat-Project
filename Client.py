@@ -6,6 +6,15 @@ import socket
 import json
 import threading
 import time
+import os
+import base64
+
+from Security import (
+    gerar_chaves_dh,
+    serializar_chave_publica,
+    carregar_chave_publica,
+    derivar_chave_sessao
+)
 
 timer_digitacao = None
 sock = None
@@ -13,6 +22,8 @@ usuario = ""
 destinatario_atual = ""
 contatos_disponiveis = []
 conversas = {}
+estado_troca_chaves = {}
+chaves_sessao = {}
 
 def registrar_gui():
     username = entry_novo_usuario.get()
@@ -479,6 +490,63 @@ def notificar_parou_digitar(sock, remetente, destinatario):
 def atualizar_contatos_periodicamente():
     carregar_contatos()
     root.after(5000, atualizar_contatos_periodicamente)
+
+def iniciar_troca_chaves():
+    if not destinatario_atual:
+        return
+
+    chave_privada, chave_publica = gerar_chaves_dh()
+
+    chave_publica_bytes = serializar_chave_publica(chave_publica)
+    salt = os.urandom(16)
+
+    estado_troca_chaves[destinatario_atual] = {
+        "chave_privada": chave_privada,
+        "salt": salt
+    }
+
+    pacote = {
+        "acao": "trocar_chave",
+        "remetente": usuario,
+        "destinatario": destinatario_atual,
+        "chave_publica": base64.b64encode(
+            chave_publica_bytes
+        ).decode("utf-8"),
+        "salt": base64.b64encode(salt).decode("utf-8")
+    }
+
+    enviar_json(pacote)
+
+def responder_troca_chaves(requisicao):
+    remetente = requisicao.get("remetente")
+    chave_publica_remota = requisicao.get("chave_publica") 
+    salt_recebido = requisicao.get("salt")
+
+    if not remetente or not chave_publica_remota or not salt_recebido:
+        print("[ERRO] Solicitação de troca de chaves incompleta")
+        return
+
+    chave_privada, chave_publica = gerar_chaves_dh()
+
+    chave_bytes = base64.b64decode(chave_publica_remota)
+    chave_publica_remota = carregar_chave_publica(chave_bytes)
+    salt = base64.b64decode(salt_recebido)
+
+    chaves_sessao = derivar_chave_sessao(
+        chave_privada,
+        chave_publica_remota,
+        salt
+    )
+
+    chaves_sessao[remetente] = chaves_sessao
+
+    pacote = {
+        "acao": "resposta_chave",
+        "remetente": usuario,
+        "destinatario": remetente,
+        "chave_publica": base64.b64encode(serializar_chave_publica(chave_publica)).decode('utf-8'),
+        "salt": salt_recebido
+    }
 
 # Tela de Login
 frame_login = tk.Frame(root)
